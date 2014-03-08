@@ -1,12 +1,10 @@
-import os
-import urllib
 import urllib2
-from PyQt4.QtCore import QThread, pyqtSignal
 import time
 from logs.LogManager import LogManager
 from spiders.Spider import Spider
 from utils.Regex import Regex
 from utils.Utils import Utils
+import os
 
 __author__ = 'Rabbi'
 
@@ -19,9 +17,8 @@ class YoutubeScrapper(object):
         self.utils = Utils()
 
 
-    def scrapVideoDownloadUrl(self, url):
+    def scrapVideoDownloadUrl(self, url, filename=None):
         data = self.spider.fetchData(url)
-        #        data = self.spider.fetchData(url)
         if data and len(data) > 0:
             title = self.scrapTitle(url)
             data = self.regex.reduceNewLine(data)
@@ -38,7 +35,8 @@ class YoutubeScrapper(object):
                 print dlUrlPart
 
                 ## TODO
-                if self.regex.isFoundPattern('(?i)itag=18', dlUrlPart):
+                if self.regex.isFoundPattern('(?i)itag=22', dlUrlPart) or self.regex.isFoundPattern('(?i)itag=18',
+                                                                                                    dlUrlPart):
                     urlPart = dlUrlPart.split(' ')
                     for part in urlPart:
                         print part
@@ -56,19 +54,24 @@ class YoutubeScrapper(object):
                     print self.downloadDir
                     break
 
-            dlPath = './natok.mp4'
+            # dlPath = './natok.mp4' if filename is None else filename
+            fname = self.regex.replaceData('\s+', '_', title)
+            dlPath = './' + fname  + '.mp4' if filename is None else filename
             print dlPath
             print '\n\n'
             if self.downloadFile(videoUrl, dlPath) is True:
                 print 'Download complete'
+        else:
+            print 'No data found.'
 
     def scrapTitle(self, url):
-    #        https://www.youtube.com/oembed?url=http://www.youtube.com/watch?v=9bZkp7q19f0&format=xml
+        #        https://www.youtube.com/oembed?url=http://www.youtube.com/watch?v=9bZkp7q19f0&format=xml
         xmlUrl = 'https://www.youtube.com/oembed?url=' + str(url) + '&format=xml'
         data = self.spider.fetchData(xmlUrl)
         if data and len(data) > 0:
             data = self.regex.reduceNewLine(data)
             data = self.regex.reduceBlankSpace(data)
+            print data
             return self.regex.getSearchedData('(?i)<title>([^<]*)</title>', data)
 
     def downloadFile(self, url, downloadPath, retry=0):
@@ -81,15 +84,8 @@ class YoutubeScrapper(object):
                 ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'),
                 ('Connection', 'keep-alive')]
             #            resp = opener.open(url, timeout=10)
-            resp = urllib2.urlopen(url, timeout=30)
+            resp = urllib2.urlopen(url, timeout=60)
             print 'ok'
-            #            if resp.info()['Connection'] == 'close' or resp.getcode() != 200:
-            #                if retry < 3:
-            #                    self.notifyYoutube.emit('<font color=red><b>Failed to download file. Retrying...</b></font>')
-            #                    return self.downloadFile(url, downloadPath, retry + 1)
-            #                else:
-            #                    self.notifyYoutube.emit('<font color=red><b>Failed to download file after 3 retry.</b></font>')
-            #                    return
 
             print resp.info()
             contentLength = resp.info()['Content-Length']
@@ -98,11 +94,21 @@ class YoutubeScrapper(object):
             directory = os.path.dirname(downloadPath)
             if not os.path.exists(directory):
                 os.makedirs(directory)
-            dl_file = open(downloadPath, 'wb')
             currentSize = 0
-            CHUNK_SIZE = 32768
+            dl_file = open(downloadPath, 'ab')
+            try:
+                if os.path.getsize(downloadPath):
+                    start = os.path.getsize(downloadPath)
+                    currentSize = start
+                    opener.addheaders.append(('Range', 'bytes=%s-' % (start)))
+            except Exception, x:
+                print x
+
+            res = opener.open(url, timeout=60)
+            CHUNK_SIZE = 256 * 1024
             while True:
-                data = resp.read(CHUNK_SIZE)
+                data = res.read(CHUNK_SIZE)
+                # data = resp.read(CHUNK_SIZE)
                 if not data:
                     break
                 currentSize += len(data)
@@ -110,48 +116,22 @@ class YoutubeScrapper(object):
 
                 print('============> ' + \
                       str(round(float(currentSize * 100) / totalSize, 2)) + \
-                      '% of ' + str(totalSize) + ' bytes')
+                      '% of ' + str(totalSize / (1024 * 1024)) + ' Mega Bytes')
                 notifyDl = '===> Downloaded ' + str(round(float(currentSize * 100) / totalSize, 2)) + '% of ' + str(
                     totalSize) + ' KB.'
-                if currentSize >= totalSize:
-                    dl_file.close()
-                    return True
+            if currentSize >= totalSize:
+                dl_file.close()
+                return True
         except Exception, x:
-            error = 'Error downloading: ' + x
-            return False
-
-    def downloadVideo(self, videoUrl, dlPath):
-        try:
-            r = urllib.urlopen(videoUrl)
-            if r.getcode() != 200 or r.info()['Connection'] == 'close':
-                return False
-                #            resp = urllib2.urlopen(videoUrl, timeout=10).read()
-            resp = urllib2.urlopen(videoUrl, timeout=10)
-            print 'resp.....'
-            print resp.info()
-            totalSize = int(resp.info().getheader('Content-Length').strip())
-            currentSize = 0
-            CHUNK_SIZE = 32768
-            dl_file = open(dlPath, 'wb')
-            while True:
-                data = resp.read(CHUNK_SIZE)
-                if not data:
-                    break
-                currentSize += len(data)
-                dl_file.write(data)
-
-                print('============> ' + \
-                      str(round(float(currentSize * 100) / totalSize, 2)) + \
-                      '% of ' + str(totalSize) + ' bytes')
-                notifyDl = '============> ' + str(round(float(currentSize * 100) / totalSize, 2)) + '% of ' + str(
-                    totalSize) + ' bytes'
-                if currentSize >= totalSize:
-                    return True
-        except Exception, x:
-            error = 'Error downloading: ' + x
-            return False
-
+            error = 'Error downloading: '
+            print x
+            if retry < 20:
+                time.sleep(30)
+                return self.downloadFile(url, downloadPath, retry + 1)
+        return False
 
 if __name__ == '__main__':
     var = YoutubeScrapper()
-    var.scrapVideoDownloadUrl('http://www.youtube.com/watch?v=H3Ih5FHi2xU')
+    ## http://www.youtube.com/watch?v=WzKMa9HNu-s  m-part2
+    # var.scrapVideoDownloadUrl('http://www.youtube.com/watch?v=C6iuDz7-oRw', './Jamai-Daoat-Paise-HD.mp4')
+    var.scrapVideoDownloadUrl('http://www.youtube.com/watch?v=C6iuDz7-oRw')

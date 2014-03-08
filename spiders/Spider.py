@@ -43,6 +43,7 @@ class Spider:
             else:
                 return self.opener.open(url, urllib.urlencode(parameters), timeout=config.TIMEOUT).read()
         except Exception, x:
+            print x
             self.logger.debug(x)
             if retry < config.RETRY_COUNT:
                 self.fetchData(url, parameters, retry + 1)
